@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>GI annotation</title>
+<style>
+:root{--bg:#101516;--panel:#182022;--line:#2a3639;--tx:#e6eceb;--mu:#93a3a1;--ac:#5fb3a1;color-scheme:dark}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.45 system-ui,sans-serif}
+main{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(280px,1fr);gap:20px;padding:20px;max-width:1200px;margin:auto}
+@media(max-width:800px){main{grid-template-columns:1fr}}
+#stage{position:relative;line-height:0;display:inline-block;touch-action:none}
+#img{max-width:100%;max-height:78vh;cursor:crosshair;user-select:none;-webkit-user-drag:none}
+#cv{position:absolute;left:0;top:0;pointer-events:none}
+label{display:block;margin-top:10px;color:var(--mu);font-size:13px}
+input,select,textarea,button{width:100%;padding:8px;background:var(--panel);color:var(--tx);border:1px solid var(--line);border-radius:6px;font:inherit}
+input[type=checkbox]{width:auto}
+button{cursor:pointer;background:var(--ac);color:#06201a;border:0;font-weight:700;margin-top:10px}
+button.sec{background:var(--panel);color:var(--tx);border:1px solid var(--line)}
+.row{display:flex;gap:8px}#login{max-width:340px;margin:15vh auto;padding:20px}[hidden]{display:none!important}
+#msg{color:#ff9c8f}
+</style></head><body>
+<div id="login"><h2>Select your ID</h2><select id="doc"></select><button id="start">Start</button></div>
+<main id="app" hidden>
+ <div><div id="stage"><img id="img" alt="Endoscopy image" draggable="false"><canvas id="cv"></canvas></div>
+  <p style="color:var(--mu)">Drag on the image to draw one box around the main abnormality.</p></div>
+ <div>
+  <div id="prog" style="color:var(--mu)"></div>
+  <label>Question (write it as you would ask it clinically)</label><textarea id="q" rows="2"></textarea>
+  <label>Reference answer (short, clinical)</label><textarea id="a" rows="2"></textarea>
+  <label>Lesion type</label><select id="lt"><option>polyp</option><option>ulcerative colitis</option><option>esophagitis</option><option>hemorrhoid</option><option>bleeding</option><option>other lesion</option></select>
+  <label>Severity</label><select id="sev"><option>none</option><option>mild</option><option>moderate</option><option>severe</option></select>
+  <label>Your confidence (0-100)</label><input id="conf" type="number" min="0" max="100" value="80">
+  <label><input type="checkbox" id="none"> No abnormality in this image</label>
+  <div class="row"><button class="sec" id="prev">Back</button><button id="next">Save and next</button></div>
+  <button class="sec" id="export">Download my annotations</button><p id="msg"></p>
+ </div></main>
+<script src="annotation_study/cases.js"></script>
+<script>
+const $=id=>document.getElementById(id);
+let doc,list,i=0,store={},box=null,drag=null;
+const K=()=>"gi_ann_"+doc;
+Object.keys(CASES).forEach(d=>$("doc").add(new Option(d,d)));
+$("start").onclick=()=>{doc=$("doc").value;list=CASES[doc];
+ try{store=JSON.parse(localStorage.getItem(K())||"{}")}catch(e){store={}}
+ $("login").hidden=true;$("app").hidden=false;i=Math.max(0,list.findIndex(c=>!store[c.case_id]));show()};
+function show(){const c=list[i],s=store[c.case_id]||{};
+ $("img").src=`annotation_study/${c.file}`;$("prog").textContent=`Case ${i+1} of ${list.length}. Saved: ${Object.keys(store).length}`;
+ $("q").value=s.question||"";$("a").value=s.answer||"";$("lt").value=(s.lesion_type&&s.lesion_type!=="normal")?s.lesion_type:"polyp";
+ $("sev").value=s.severity||"none";$("conf").value=s.confidence??80;$("none").checked=!!s.no_lesion;box=s.box||null;$("msg").textContent=""}
+function draw(){const im=$("img"),cv=$("cv");cv.width=im.clientWidth;cv.height=im.clientHeight;
+ const g=cv.getContext("2d");g.clearRect(0,0,cv.width,cv.height);
+ if(box){g.strokeStyle="#ff5a4d";g.lineWidth=3;g.strokeRect(box[0]*cv.width,box[1]*cv.height,(box[2]-box[0])*cv.width,(box[3]-box[1])*cv.height)}}
+$("img").onload=draw;window.onresize=draw;
+const pt=e=>{const r=$("img").getBoundingClientRect();return[Math.min(1,Math.max(0,(e.clientX-r.left)/r.width)),Math.min(1,Math.max(0,(e.clientY-r.top)/r.height))]};
+$("img").onpointerdown=e=>{drag=pt(e);$("img").setPointerCapture(e.pointerId);$("none").checked=false};
+$("img").onpointermove=e=>{if(!drag)return;const p=pt(e);box=[Math.min(drag[0],p[0]),Math.min(drag[1],p[1]),Math.max(drag[0],p[0]),Math.max(drag[1],p[1])];draw()};
+$("img").onpointerup=()=>{drag=null;if(box&&(box[2]-box[0]<.01||box[3]-box[1]<.01)){box=null;draw()}};
+function save(){const c=list[i],none=$("none").checked,im=$("img");
+ if(!none&&!box){$("msg").textContent="Draw a box, or tick 'No abnormality'.";return false}
+ if(!$("q").value.trim()||!$("a").value.trim()){$("msg").textContent="Question and answer are required.";return false}
+ store[c.case_id]={case_id:c.case_id,file:c.file,doctor_id:doc,question:$("q").value.trim(),answer:$("a").value.trim(),
+  lesion_type:none?"normal":$("lt").value,severity:none?"none":$("sev").value,confidence:+$("conf").value,
+  no_lesion:none,box:none?null:box,w:im.naturalWidth,h:im.naturalHeight};
+ try{localStorage.setItem(K(),JSON.stringify(store))}catch(e){}return true}
+$("next").onclick=()=>{if(save()){if(i<list.length-1){i++;show()}else $("msg").textContent="All cases saved. Download your annotations."}};
+$("prev").onclick=()=>{if(i>0){i--;show()}};
+$("export").onclick=()=>{const L=Object.values(store).map(s=>JSON.stringify({...s,
+  bbox:s.box&&[Math.round(s.box[0]*s.w),Math.round(s.box[1]*s.h),Math.round(s.box[2]*s.w),Math.round(s.box[3]*s.h)]}));
+ const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([L.join("\n")+"\n"],{type:"text/plain"}));
+ a.download=`annotations_${doc}.jsonl`;a.click()};
+</script></body></html>
